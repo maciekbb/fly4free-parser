@@ -2,31 +2,68 @@ require 'httparty'
 require 'json'
 require 'pry'
 
+def with_time_measure(description)
+  start = Time.now
+  puts "Starting #{description}"
+  result = with_retry(description) do
+    yield
+  end
+  puts "Time taken #{(Time.now-start)} seconds"
+  result
+end
+
+def with_retry(description)
+  begin
+    tries = 0
+    yield
+  rescue => e
+    puts e
+    tries += 1
+    unless tries > 3
+      puts "Retrying..."
+      retry
+    end
+  end
+end
+
 POLAND_ID = 142
+START_PAGE = 1
+PAGES = 2 # change this to fetch more pages :)
 
 def parse_date(date)
-  match = /(\d+) (\S+) (\d+), (\d+):(\d+)/.match(date)
+  match = /(.*), (.*)/.match(date)
   if match
-    "#{match[4].to_i}:#{match[5].to_i}"
+    match[2]
   else
     raise "invalid date provided  #{date}"
   end
 end
 
 stats = []
-(1..30).each do |page|
+(START_PAGE..PAGES).each do |page|
+  crawl = with_time_measure "crawl page #{page}" do
+    HTTParty.get("https://hidden-earth-2612.herokuapp.com/crawl/#{page}")
+  end
 
-  crawl = HTTParty.get("https://hidden-earth-2612.herokuapp.com/crawl/#{page}")
-  articles = JSON.parse(crawl.body)
-  puts "Articles fetched. Analyzing..."
+  begin
+    articles = JSON.parse(crawl.body)
+  rescue
+    puts "Could not parse json"
+    puts crawl.body
+    next
+  end
+
   articles.each do |article|
-    entities = HTTParty.post('http://quiet-shelf-9562.herokuapp.com/analyze/', body: {
-      content: [article["title"], article["content"], article["extended_content"]].join(" ")[0..250]
-    })
+    entities = with_time_measure "analyze #{article['title']}" do
+      HTTParty.post('http://quiet-shelf-9562.herokuapp.com/analyze/', body: {
+        content: [article["title"], article["content"], article["extended_content"]].join(" ")[0..250]
+      })
+    end
+
     cities = entities["cities"]
     sources = cities.find_all { |c| c["country_id"] == POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
     destinationes = cities.find_all { |c| c["country_id"] != POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
-    prices = article["content"].scan(/\d+ PLN/).join(", ")
+    prices = article["content"].scan(/\d+ PLN/)
     airlines = entities["airlines"].map { |a| a["base_form"] }.uniq.join(", ")
 
     if destinationes.size > 0
@@ -37,7 +74,7 @@ stats = []
       puts "To #{destinationes}"
 
       if prices.size > 0
-        puts "For #{prices}"
+        puts "For #{prices.join(", ")}"
       end
 
       if airlines.size > 0
@@ -55,9 +92,8 @@ stats = []
         time: parse_date(article["date"])
       }
     end
-
-
   end
+  puts stats.to_json
 end
 
 puts stats.to_json
