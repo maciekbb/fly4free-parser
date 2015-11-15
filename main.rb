@@ -5,9 +5,7 @@ require 'pry'
 def with_time_measure(description)
   start = Time.now
   puts "Starting #{description}"
-  result = with_retry(description) do
-    yield
-  end
+  result = yield
   puts "Time taken #{(Time.now-start)} seconds"
   result
 end
@@ -15,11 +13,13 @@ end
 def with_retry(description)
   begin
     tries = 0
-    yield
+    with_time_measure(description) do
+      yield
+    end
   rescue => e
     puts e
     tries += 1
-    unless tries > 3
+    if tries < 3
       puts "Retrying..."
       retry
     end
@@ -41,7 +41,7 @@ end
 
 stats = []
 (START_PAGE..PAGES).each do |page|
-  crawl = with_time_measure "crawl page #{page}" do
+  crawl = with_retry "crawl page #{page}" do
     HTTParty.get("https://hidden-earth-2612.herokuapp.com/crawl/#{page}")
   end
 
@@ -54,7 +54,7 @@ stats = []
   end
 
   articles.each do |article|
-    entities = with_time_measure "analyze #{article['title']}" do
+    entities = with_retry "analyze #{article['title']}" do
       HTTParty.post('http://quiet-shelf-9562.herokuapp.com/analyze/', body: {
         content: [article["title"], article["content"], article["extended_content"]].join(" ")[0..250]
       })
@@ -63,7 +63,7 @@ stats = []
     cities = entities["cities"]
     sources = cities.find_all { |c| c["country_id"] == POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
     destinationes = cities.find_all { |c| c["country_id"] != POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
-    prices = article["content"].scan(/\d+ PLN/)
+    prices = [article["title"], article["content"]].join(" ").scan(/\d+ PLN/).uniq
     airlines = entities["airlines"].map { |a| a["base_form"] }.uniq.join(", ")
 
     if destinationes.size > 0
@@ -94,6 +94,7 @@ stats = []
     end
   end
   puts stats.to_json
+  puts "---"
 end
 
 puts stats.to_json
