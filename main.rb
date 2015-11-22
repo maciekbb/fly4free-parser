@@ -28,18 +28,19 @@ end
 
 POLAND_ID = 142
 START_PAGE = 1
-PAGES = 2 # change this to fetch more pages :)
+PAGES = 100 # change this to fetch more pages :)
 
 def parse_date(date)
   match = /(.*), (.*)/.match(date)
   if match
-    match[2]
+    [match[1], match[2]]
   else
     raise "invalid date provided  #{date}"
   end
 end
 
 stats = []
+warn = 0
 (START_PAGE..PAGES).each do |page|
   crawl = with_retry "crawl page #{page}" do
     HTTParty.get("https://hidden-earth-2612.herokuapp.com/crawl/#{page}")
@@ -61,17 +62,21 @@ stats = []
     end
 
     cities = entities["cities"]
-    sources = cities.find_all { |c| c["country_id"] == POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
-    destinationes = cities.find_all { |c| c["country_id"] != POLAND_ID }.map { |c| c["base_form"] }.uniq.join(", ")
+    sources = cities.find_all { |c| c["country_id"] == POLAND_ID }.uniq
+    destinations = cities.find_all { |c| c["country_id"] != POLAND_ID }.uniq
     prices = [article["title"], article["content"]].join(" ").scan(/\d+ PLN/).uniq
     airlines = entities["airlines"].map { |a| a["base_form"] }.uniq.join(", ")
 
-    if destinationes.size > 0
+    puts "destinations count #{destinations.size}"
+    destinations = destinations.select { |dest| article["tags"].find { |t| t.downcase == dest["base_form"].downcase } }
+    puts "destinations count in tags #{destinations.size}"
+
+    if destinations.size > 0
       if sources.size > 0
-        puts "From #{sources}"
+        puts "From #{sources.map { |c| c["base_form"] }.join(", ")}"
       end
 
-      puts "To #{destinationes}"
+      puts "To #{destinations.map { |c| c["base_form"] }.join(", ")}"
 
       if prices.size > 0
         puts "For #{prices.join(", ")}"
@@ -85,11 +90,17 @@ stats = []
       puts "--------\n"
 
       # FILL stats
+      parsed_date = parse_date(article["date"])
       stats << {
-        cities: cities.map { |c| c["id"]}.uniq,
+        sources: sources.map { |c| c["id"] },
+        destinations: destinations.map { |c| c["id"] },
         airlines: entities["airlines"].map { |a| a["id"] }.uniq,
         prices: prices,
-        time: parse_date(article["date"])
+        comments_count: article["comments"].size,
+        max_comment_rating: article["comments"].map { |c| c["rank"] }.max.to_i,
+        min_comment_rating: article["comments"].map { |c| c["rank"] }.min.to_i,
+        date: parsed_date[0],
+        time: parsed_date[1]
       }
     end
   end
