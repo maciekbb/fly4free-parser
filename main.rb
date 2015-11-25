@@ -4,9 +4,9 @@ require 'pry'
 
 def with_time_measure(description)
   start = Time.now
-  puts "Starting #{description}"
+  puts "[INFO] Starting #{description}"
   result = yield
-  puts "Time taken #{(Time.now-start)} seconds"
+  puts "[INFO] Time taken #{(Time.now-start)} seconds"
   result
 end
 
@@ -20,7 +20,7 @@ def with_retry(description)
     puts e
     tries += 1
     if tries < 3
-      puts "Retrying..."
+      puts "[WARN] Retrying..."
       retry
     end
   end
@@ -28,7 +28,6 @@ end
 
 POLAND_ID = 142
 START_PAGE = 1
-PAGES = 100 # change this to fetch more pages :)
 
 def parse_date(date)
   match = /(.*), (.*)/.match(date)
@@ -41,7 +40,7 @@ end
 
 stats = []
 warn = 0
-(START_PAGE..PAGES).each do |page|
+(START_PAGE..ARGV[0].to_i).each do |page|
   crawl = with_retry "crawl page #{page}" do
     HTTParty.get("https://hidden-earth-2612.herokuapp.com/crawl/#{page}")
   end
@@ -49,7 +48,7 @@ warn = 0
   begin
     articles = JSON.parse(crawl.body)
   rescue
-    puts "Could not parse json"
+    puts "[ERROR] Could not parse json"
     puts crawl.body
     next
   end
@@ -57,7 +56,7 @@ warn = 0
   articles.each do |article|
     entities = with_retry "analyze #{article['title']}" do
       HTTParty.post('http://quiet-shelf-9562.herokuapp.com/analyze/', body: {
-        content: [article["title"], article["content"], article["extended_content"]].join(" ")[0..250]
+        content: [article["title"], article["content"], article["extended_content"]].join(" ")[0..300]
       })
     end
 
@@ -67,9 +66,9 @@ warn = 0
     prices = [article["title"], article["content"]].join(" ").scan(/\d+ PLN/).uniq
     airlines = entities["airlines"].map { |a| a["base_form"] }.uniq.join(", ")
 
-    puts "destinations count #{destinations.size}"
+    puts "[INFO] Initial destinations: #{destinations.map { |c| c["base_form"] }.join(", ")} (#{destinations.size})"
     destinations = destinations.select { |dest| article["tags"].find { |t| t.downcase == dest["base_form"].downcase } }
-    puts "destinations count in tags #{destinations.size}"
+    puts "[INFO] Destinations in tags #{destinations.map { |c| c["base_form"] }.join(", ")} (#{destinations.size})"
 
     if destinations.size > 0
       if sources.size > 0
@@ -109,3 +108,4 @@ warn = 0
 end
 
 puts stats.to_json
+File.open("stats-#{Time.now}.json", 'w') { |file| file.write(stats.to_json) }
